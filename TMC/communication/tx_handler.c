@@ -1,59 +1,144 @@
+#include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
 #include "Config/config.h"
 #include "drivers/USART.h"
 
-#define HEADER_SIZE 3
-#define CHECKSUM_VAR uint16_t
-#define CHECKSUM_SIZE sizeof(uint16_t)
-#define HEADER 0x69
+#define TX_HANDLER_BUFFERS 5
 
-static USART_t *port;
-static bool pending_message;
-uint8_t tx_buffer[255];
-uint8_t *header_buffer = tx_buffer;
-uint8_t *msg_buffer = tx_buffer + HEADER_SIZE;
+static void _tx_complete_cb();
 
-void _tx_completed_callback();
-
-void TX_Handler_init()
+typedef struct
 {
-    port = USART_GetUSART(CONFIG_COMM_HANDLER_USART);
-    port->TXCompleteCallback = _tx_completed_callback;
-    pending_message = false;
+    uint8_t buffer[CONFIG_COMM_HANDLER_BUFFER_LEN];
+    uint16_t len;
+} fifo_el_t;
+
+static fifo_el_t *elementsBuffer[TX_HANDLER_BUFFERS];
+static uint8_t head_index = 0;
+static uint8_t tail_index = 0;
+static uint8_t queue_size = 0;
+static fifo_el_t tx_buffers[TX_HANDLER_BUFFERS];
+void TX_Task();
+static fifo_el_t *BufferGetFirst()
+{
+    if (queue_size == 0)
+        return NULL;
+    fifo_el_t *ret = elementsBuffer[tail_index];
+    return ret;
 }
-void constructHeader(uint8_t msg_len)
+static void BufferRemoveFirst()
 {
-    header_buffer[0] = HEADER;
-    header_buffer[1] = HEADER - 1;
-    header_buffer[2] = msg_len;
+    elementsBuffer[tail_index] = NULL;
+    tail_index = (tail_index + 1) % TX_HANDLER_BUFFERS;
+    queue_size--;
 }
 
-uint16_t _createFrame(uint8_t *buffer, uint8_t len)
+static bool BufferInsert(fifo_el_t* el)
 {
-    memcpy(msg_buffer, buffer, len);
-    constructHeader(len + HEADER_SIZE + CHECKSUM_SIZE);
-    CHECKSUM_VAR checksum = 0;
-
-    for (uint8_t i = 0; i < len + HEADER_SIZE; i++)
+    if (queue_size >= TX_HANDLER_BUFFERS)
     {
-        checksum += tx_buffer[i];
-    }
-    memcpy(msg_buffer + len, &checksum, CHECKSUM_SIZE);
-    return len + CHECKSUM_SIZE + HEADER_SIZE;
-}
-
-bool TX_Handler_SendData(uint8_t *buffer, uint8_t len)
-{
-    if (pending_message)
         return false;
-    uint16_t buffer_len = _createFrame(buffer, len);
-    port->TransmitDMA(tx_buffer, buffer_len);
-    pending_message = true;
+    }
+    elementsBuffer[head_index] = el;
+    head_index = (head_index + 1) % TX_HANDLER_BUFFERS;
+    queue_size++;
     return true;
 }
 
-void _tx_completed_callback()
+static bool BufferIsIn(fifo_el_t *el)
 {
-    pending_message = false;
+    for (uint8_t i = 0; i < queue_size; i++)
+    {
+        if (elementsBuffer[(tail_index + i) % 5] == el)
+            return true;
+    }
+    return false;
+}
+
+static USART_t *port;
+static bool tx_complete;
+static bool send_with_fifo = false;
+void TX_Init()
+{
+    port = USART_GetUSART(CONFIG_COMM_HANDLER_USART);
+    port->TXCompleteCallback = _tx_complete_cb;
+    queue_size = 0;
+    head_index = 0;
+    tail_index = 0;
+    tx_complete = true;
+}
+
+uint8_t* TX_GetFreeBuffer(void)
+{
+    for (uint8_t i = 0; i < TX_HANDLER_BUFFERS; i++)
+    {
+        if (!BufferIsIn(&tx_buffers[i]))
+        {
+            return tx_buffers[i].buffer;
+        }
+    }
+    return (void*)0;
+}
+
+void TX_SendData(uint8_t *buffer, uint16_t len)
+{
+    // if (tx_complete && (queue_size==0))
+    // {
+    //     tx_complete = false;
+    //     port->TransmitDMA(buffer, len);
+    //     return;
+    // }
+
+    if (queue_size < TX_HANDLER_BUFFERS)
+    {
+        fifo_el_t *el = NULL;
+        for (uint8_t i = 0; i < TX_HANDLER_BUFFERS; i++)
+        {
+            if (tx_buffers[i].buffer == buffer)
+            {
+                el = &tx_buffers[i];
+                el->len = len;
+                break;
+            }
+        }
+        if(el==NULL)
+            return;
+        BufferInsert(el);
+        if(queue_size==1)
+            TX_Task();
+    }
+    //TX_Task();
+}
+
+bool TX_CheckEmpty()
+{
+    if (queue_size > 0)
+        return false;
+    return true;
+}
+
+void TX_Task()
+{
+    static fifo_el_t* prev_el = NULL;
+    if (tx_complete == false)
+        return;
+    if(queue_size==0)
+        return;
+    fifo_el_t* el = BufferGetFirst();
+    if ((el != NULL))
+    {
+       prev_el = el;
+       send_with_fifo = true;
+       tx_complete = false;
+       port->TransmitDMA(el->buffer, el->len);
+    }
+}
+
+static void _tx_complete_cb()
+{
+    if (send_with_fifo)
+        BufferRemoveFirst();
+    send_with_fifo = false;
+    tx_complete = true;
 }

@@ -7,6 +7,8 @@
 void Q_normalize(quaternion_t *Q)
 {
     float norm = Q_norm(Q);
+    if(norm == 0)
+        return;
     Q->i /= norm;
     Q->j /= norm;
     Q->k /= norm;
@@ -14,15 +16,15 @@ void Q_normalize(quaternion_t *Q)
 }
 void Q_fromEuler(float roll, float pitch, float yaw, quaternion_t *res)
 {
-    roll *= M_PI / 180.f;
-    pitch *= M_PI / 180.f;
-    yaw *= M_PI / 180.f;
-    float cy = cosf(yaw * 0.5);
-    float sy = sinf(yaw * 0.5);
-    float cp = cosf(pitch * 0.5);
-    float sp = sinf(pitch * 0.5);
-    float cr = cosf(roll * 0.5);
-    float sr = sinf(roll * 0.5);
+    roll *= (float)M_PI / 180.f;
+    pitch *= (float)M_PI / 180.f;
+    yaw *= (float)M_PI / 180.f;
+    float cy = cosf(yaw * 0.5f);
+    float sy = sinf(yaw * 0.5f);
+    float cp = cosf(pitch * 0.5f);
+    float sp = sinf(pitch * 0.5f);
+    float cr = cosf(roll * 0.5f);
+    float sr = sinf(roll * 0.5f);
 
     res->r = cr * cp * cy + sr * sp * sy;
     res->i = sr * cp * cy - cr * sp * sy;
@@ -70,5 +72,5 @@ void Q_toEuler(quaternion_t *Q, float *res)
     res[1] = asinf(-2 * (q_1 * q_3 - q_0 * q_2));
     res[0] = atan2f(2 * (q_2 * q_3 + q_0 * q_1), q_0 * q_0 - q_1 * q_1 - q_2 * q_2 + q_3 * q_3);
     for(uint8_t i =0; i<3;i++)
-        res[i] *=180.f/M_PI;
+        res[i] *=180.f/(float)M_PI;
 }

@@ -1,7 +1,8 @@
 #pragma once
 #include "IO/actuators.h"
 #include "time/time.h"
-
+#include "Common/PID.h"
+#include "Config/config.h"
 typedef enum 
 {
     CL_STATUS_ARMED,
@@ -26,9 +27,14 @@ void CL_Disarm();
 cl_status_e CL_GetStatus();
 cl_mode_e CL_GetMode();
 
-void CL_SetMode(cl_mode_e mode);
+
 float* CL_GetActuatorsMatrix();
-void CL_LoadControlActuatorsMatrix(uint8_t* buffer, uint16_t len);
-uint8_t* CL_SerializeControlActuatorsMatrix(uint16_t* len);
-uint8_t* CL_SerializePIDs( uint16_t* len);
-void CL_LoadPIDs(uint8_t* buffer, uint16_t len);
+void CL_SetActuatorMatrix(float* data, uint16_t len);
+
+CONFIG_PID_Container_t CL_GetPID(void);
+
+void CL_SetPID(float* buffer, uint8_t size);
+
+void CL_SetLimits(LIMITS_t Limits);
+
+LIMITS_t* CL_GetLimits(void);
